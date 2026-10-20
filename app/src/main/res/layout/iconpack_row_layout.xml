@@ -2,48 +2,53 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:background="?android:attr/activatedBackgroundIndicator">
-    <LinearLayout
-        android:orientation="horizontal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center" >
-        <ImageView
-            android:id="@+id/icon"
-            android:layout_width="75dp"
-            android:layout_height="75dp"
-            android:layout_marginStart="15dp"
-            android:layout_marginTop="5dp"
-            android:layout_marginBottom="5dp"
-            app:srcCompat="@mipmap/ic_launcher" />
+    android:gravity="center_vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:background="?android:attr/selectableItemBackground">
 
-        <LinearLayout
+    <ImageView
+        android:id="@+id/icon"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_marginEnd="16dp"
+        app:srcCompat="@mipmap/ic_launcher"
+        android:contentDescription="Icon Pack Icon" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:text="Title"
+            android:textStyle="bold"
+            android:textAppearance="@style/Base.TextAppearance.AppCompat.Medium" />
 
-            <TextView
-                android:id="@+id/title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="title"
-                android:textStyle="bold"
-                android:layout_marginLeft="15dp"
-                android:layout_marginStart="15dp"
-                android:textAppearance="@style/Base.TextAppearance.AppCompat.Medium" />
-
-            <TextView
-                android:id="@+id/description"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="description"
-                android:layout_marginLeft="15dp"
-                android:layout_marginStart="15dp"
-                android:layout_marginTop="5dp"
-                android:textSize="16sp"/>
-        </LinearLayout>
+        <TextView
+            android:id="@+id/description"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="package.name"
+            android:layout_marginTop="3dp"
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary" />
     </LinearLayout>
+
+    <RadioButton
+        android:id="@+id/radio_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:clickable="false"
+        android:focusable="false" />
+
 </LinearLayout>

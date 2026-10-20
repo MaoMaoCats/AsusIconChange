@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">ASUS Icon Pack Applyer</string>
+    <string name="apply_button">Apply Icon Pack</string>
+    <string name="default_icons">Default Icons (ZenUI / ROG)</string>
+    <string name="default_icons_desc">ASUS Default System Icons</string>
+    <string name="no_icon_packs">No third-party icon packs found</string>
+    <string name="no_icon_packs_desc">Install icon packs from Play Store or Icon Pack Studio</string>
+    <string name="refresh">Refresh List</string>
+    <string name="restore_wallpaper">Restore Wallpaper</string>
+    <string name="get_more_icons">Get Icon Packs (Play Store)</string>
 </resources>

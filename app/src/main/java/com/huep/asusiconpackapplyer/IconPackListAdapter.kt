@@ -1,32 +1,61 @@
 package com.huep.asusiconpackapplyer
 
 import android.app.Activity
-import android.content.pm.ApplicationInfo
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-class IconPackListAdapter(private val context: Activity, private val _package: ArrayList<ApplicationInfo>)
-    : ArrayAdapter<ApplicationInfo>(context, R.layout.iconpack_row_layout, _package) {
+import android.widget.ArrayAdapter
+import android.widget.ImageView
+import android.widget.RadioButton
+import android.widget.TextView
 
-    fun getName(pack:ApplicationInfo): String {
-        return pack.loadLabel(getContext().packageManager) as String
+class IconPackListAdapter(
+    private val context: Activity,
+    private val items: List<IconPackItem>,
+    private var selectedPosition: Int = 0
+) : ArrayAdapter<IconPackItem>(context, R.layout.iconpack_row_layout, items) {
+
+    fun setSelectedPosition(position: Int) {
+        selectedPosition = position
+        notifyDataSetChanged()
     }
 
-    override fun getView(position: Int, view: View?, parent: ViewGroup): View {
-        val inflater = context.layoutInflater
-        val rowView = inflater.inflate(R.layout.iconpack_row_layout, null, true)
+    fun getSelectedPosition(): Int = selectedPosition
 
-        val titleText = rowView.findViewById(R.id.title) as TextView
-        val imageView = rowView.findViewById(R.id.icon) as ImageView
-        val subtitleText = rowView.findViewById(R.id.description) as TextView
+    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+        val rowView = convertView ?: LayoutInflater.from(context).inflate(
+            R.layout.iconpack_row_layout,
+            parent,
+            false
+        )
 
-        if (_package[position].packageName == "com.asus.launcher")
-            titleText.text = "Default Icons"
-        else
-            titleText.text = getName(_package[position])
-        val icon = _package[position].loadIcon(getContext().packageManager)
-        imageView.setImageDrawable(icon)
-        subtitleText.text = _package[position].packageName
+        val item = items[position]
+        val titleText = rowView.findViewById<TextView>(R.id.title)
+        val subtitleText = rowView.findViewById<TextView>(R.id.description)
+        val imageView = rowView.findViewById<ImageView>(R.id.icon)
+        val radioButton = rowView.findViewById<RadioButton>(R.id.radio_button)
+
+        titleText.text = item.name
+        subtitleText.text = when {
+            item.isDefault -> context.getString(R.string.default_icons_desc)
+            item.isPlaceholder -> context.getString(R.string.no_icon_packs_desc)
+            else -> item.packageName
+        }
+
+        if (item.icon != null) {
+            imageView.setImageDrawable(item.icon)
+        } else {
+            imageView.setImageResource(R.mipmap.ic_launcher)
+        }
+
+        if (item.isPlaceholder) {
+            radioButton.visibility = View.GONE
+            rowView.isEnabled = false
+        } else {
+            radioButton.visibility = View.VISIBLE
+            rowView.isEnabled = true
+            radioButton.isChecked = (position == selectedPosition)
+        }
 
         return rowView
     }
