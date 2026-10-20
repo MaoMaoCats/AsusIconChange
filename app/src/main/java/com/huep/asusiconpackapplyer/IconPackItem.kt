@@ -7,5 +7,7 @@ data class IconPackItem(
     val name: String,
     val icon: Drawable?,
     val isDefault: Boolean = false,
-    val isPlaceholder: Boolean = false
+    val isPlaceholder: Boolean = false,
+    val isAsusCompatible: Boolean = true,
+    val compatibilityNote: String = ""
 )

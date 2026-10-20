@@ -32,6 +32,7 @@ class IconPackListAdapter(
         val item = items[position]
         val titleText = rowView.findViewById<TextView>(R.id.title)
         val subtitleText = rowView.findViewById<TextView>(R.id.description)
+        val badgeText = rowView.findViewById<TextView>(R.id.compatibility_badge)
         val imageView = rowView.findViewById<ImageView>(R.id.icon)
         val radioButton = rowView.findViewById<RadioButton>(R.id.radio_button)
 
@@ -40,6 +41,19 @@ class IconPackListAdapter(
             item.isDefault -> context.getString(R.string.default_icons_desc)
             item.isPlaceholder -> context.getString(R.string.no_icon_packs_desc)
             else -> item.packageName
+        }
+
+        if (item.isDefault || item.isPlaceholder) {
+            badgeText.visibility = View.GONE
+        } else {
+            badgeText.visibility = View.VISIBLE
+            if (item.isAsusCompatible) {
+                badgeText.text = "✓ ASUS Launcher Compatible"
+                badgeText.setTextColor(android.graphics.Color.parseColor("#388E3C")) // Green
+            } else {
+                badgeText.text = "⚠️ Incompatible: Missing appfilter.xml (Needs ASUS Patch)"
+                badgeText.setTextColor(android.graphics.Color.parseColor("#E65100")) // Orange
+            }
         }
 
         if (item.icon != null) {

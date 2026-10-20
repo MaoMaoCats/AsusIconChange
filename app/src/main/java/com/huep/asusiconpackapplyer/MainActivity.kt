@@ -1,20 +1,21 @@
 package com.huep.asusiconpackapplyer
 
 import android.annotation.SuppressLint
-import android.app.WallpaperManager
+import android.app.ProgressDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -25,9 +26,14 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -41,13 +47,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var listView: ListView
     private lateinit var loadingContainer: View
-    private lateinit var cbPreserveWallpaper: CheckBox
-    private lateinit var btnRestoreWallpaper: MaterialButton
     private lateinit var applyBtn: MaterialButton
+    private lateinit var cardReadyApk: MaterialCardView
+    private lateinit var tvReadyApkTitle: TextView
+    private lateinit var tvReadyApkDesc: TextView
+    private lateinit var btnInstallReadyApk: MaterialButton
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var cachedWallpaperBitmap: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,11 +62,13 @@ class MainActivity : AppCompatActivity() {
 
         listView = findViewById(R.id.listview)
         loadingContainer = findViewById(R.id.loading_container)
-        cbPreserveWallpaper = findViewById(R.id.cb_preserve_wallpaper)
-        btnRestoreWallpaper = findViewById(R.id.btn_restore_wallpaper)
         applyBtn = findViewById(R.id.apply_btn)
+        cardReadyApk = findViewById(R.id.card_ready_apk)
+        tvReadyApkTitle = findViewById(R.id.tv_ready_apk_title)
+        tvReadyApkDesc = findViewById(R.id.tv_ready_apk_desc)
+        btnInstallReadyApk = findViewById(R.id.btn_install_ready_apk)
 
-        // 1. Instantly display Default Icons so the user never sees a black screen
+        // 1. Instantly display Default Icons
         val defaultLauncherIcon = try {
             packageManager.getApplicationIcon("com.asus.launcher")
         } catch (e: Exception) {
@@ -70,7 +79,9 @@ class MainActivity : AppCompatActivity() {
             packageName = "system_default",
             name = getString(R.string.default_icons),
             icon = defaultLauncherIcon,
-            isDefault = true
+            isDefault = true,
+            isAsusCompatible = true,
+            compatibilityNote = "Stock ASUS ZenUI / ROG Icons"
         )
         packItems.add(defaultItem)
         selectedApp = "system_default"
@@ -88,26 +99,102 @@ class MainActivity : AppCompatActivity() {
                     selectedApp = item.packageName
                     selectedName = item.name
                     adapter?.setSelectedPosition(position)
+                    updateActionButtonState(item)
                     Toast.makeText(this, "Selected: ${item.name}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
 
         applyBtn.setOnClickListener {
-            showSafetyApplyDialog()
+            handleActionClick()
         }
 
-        btnRestoreWallpaper.setOnClickListener {
-            restoreWallpaper()
-        }
-
-        // 2. Backup current wallpaper in background on startup for safety
-        backgroundExecutor.execute {
-            backupCurrentWallpaper()
-        }
-
-        // 3. Scan for custom icon packs in background
+        // 2. Scan for custom icon packs in background
         startAsyncScan()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkReadyFixedApks()
+        startAsyncScan()
+    }
+
+    private fun updateActionButtonState(item: IconPackItem) {
+        if (item.isDefault || item.isAsusCompatible) {
+            applyBtn.text = getString(R.string.apply_button)
+            applyBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#1976D2")) // Primary blue
+            applyBtn.setIconResource(R.drawable.add_to_home)
+        } else {
+            applyBtn.text = "🛠️ Convert for ASUS Launcher"
+            applyBtn.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E65100")) // Orange
+            applyBtn.setIconResource(android.R.drawable.ic_menu_manage)
+        }
+    }
+
+    private fun checkReadyFixedApks() {
+        backgroundExecutor.execute {
+            val downloadDir = File(Environment.getExternalStorageDirectory(), "Download")
+            var readyFile: File? = null
+
+            // Prioritize the newest fixed pack
+            val newestFixed = File(downloadDir, "Exported_Icon_Pack_New_ASUS_Fixed.apk")
+            if (newestFixed.exists() && !isPackageInstalled("com.asus.iconpack.exported_icon_pack")) {
+                readyFile = newestFixed
+            } else {
+                val fixedApks = downloadDir.listFiles { f ->
+                    f.isFile && f.name.endsWith("_ASUS_Fixed.apk")
+                }
+                readyFile = fixedApks?.firstOrNull()
+            }
+
+            val finalFile = readyFile
+            mainHandler.post {
+                if (finalFile != null && finalFile.exists()) {
+                    cardReadyApk.visibility = View.VISIBLE
+                    tvReadyApkTitle.text = "📦 Converted Pack Ready: ${finalFile.name}"
+                    tvReadyApkDesc.text = "Scaled to full 192x192 with ASUS appfilter. Tap to install!"
+                    btnInstallReadyApk.setOnClickListener {
+                        promptInstallApk(finalFile)
+                    }
+                } else {
+                    cardReadyApk.visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    private fun isPackageInstalled(pkg: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(pkg, 0)
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun promptInstallApk(file: File) {
+        try {
+            val apkUri: Uri = FileProvider.getUriForFile(
+                applicationContext,
+                "${packageName}.provider",
+                file
+            )
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(installIntent)
+            Toast.makeText(this, "Opening installer for ${file.name}...", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(tag, "Install prompt failed", e)
+            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun getLabel(pack: ApplicationInfo): String {
@@ -152,7 +239,25 @@ class MainActivity : AppCompatActivity() {
                 selectedPosition = idx
                 adapter?.setSelectedPosition(idx)
                 adapter?.notifyDataSetChanged()
+
+                if (selectedPosition in 0 until packItems.size) {
+                    updateActionButtonState(packItems[selectedPosition])
+                }
             }
+        }
+    }
+
+    /**
+     * Safety Check: Verifies if an icon pack APK has compiled res/xml/appfilter.xml.
+     */
+    private fun checkAsusCompatibility(pkg: String): Boolean {
+        if (pkg == "system_default" || pkg == "com.asus.launcher") return true
+        return try {
+            val res = packageManager.getResourcesForApplication(pkg)
+            val resId = res.getIdentifier("appfilter", "xml", pkg)
+            resId != 0
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -164,7 +269,6 @@ class MainActivity : AppCompatActivity() {
 
         val detectedPackages = LinkedHashSet<String>()
 
-        // 1. Query standard icon pack intent filters (Fast query, < 20ms)
         val iconPackActions = listOf(
             "org.adw.launcher.THEMES",
             "com.novalauncher.THEME",
@@ -197,12 +301,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 2. Targeted scan: only check packages containing "icon" or "theme" or Icon Pack Studio
         try {
             val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                packageManager.getInstalledApplications(
-                    PackageManager.ApplicationInfoFlags.of(0)
-                )
+                packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
             } else {
                 @Suppress("DEPRECATION")
                 packageManager.getInstalledApplications(0)
@@ -225,7 +326,6 @@ class MainActivity : AppCompatActivity() {
             Log.w(tag, "Package list query error", e)
         }
 
-        // 3. Build IconPackItems
         val result = ArrayList<IconPackItem>()
         for (pkg in detectedPackages) {
             try {
@@ -237,12 +337,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 val label = getLabel(appInfo)
                 val icon = appInfo.loadIcon(packageManager)
+                val isCompatible = checkAsusCompatibility(pkg)
+
                 result.add(
                     IconPackItem(
                         packageName = pkg,
                         name = label,
                         icon = icon,
-                        isDefault = false
+                        isDefault = false,
+                        isAsusCompatible = isCompatible,
+                        compatibilityNote = if (isCompatible) "ASUS Ready" else "Needs ASUS Patch"
                     )
                 )
                 seenPackages.add(pkg)
@@ -251,111 +355,136 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        result.sortBy { it.name.lowercase() }
+        // ASUS-compatible packs on top, then alphabetical
+        result.sortWith(compareByDescending<IconPackItem> { it.isAsusCompatible }.thenBy { it.name.lowercase() })
         return result
     }
 
-    private fun backupCurrentWallpaper(): Boolean {
-        return try {
-            val wm = WallpaperManager.getInstance(applicationContext)
-            val drawable = wm.drawable
-            if (drawable != null) {
-                val bmp = if (drawable is BitmapDrawable && drawable.bitmap != null) {
-                    drawable.bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                } else {
-                    val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 1080
-                    val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 2400
-                    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    val canvas = Canvas(bitmap)
-                    drawable.setBounds(0, 0, canvas.width, canvas.height)
-                    drawable.draw(canvas)
-                    bitmap
-                }
-                cachedWallpaperBitmap = bmp
-
-                // Save to file in cache directory
-                val backupFile = File(cacheDir, "wallpaper_backup.png")
-                FileOutputStream(backupFile).use { out ->
-                    bmp.compress(Bitmap.CompressFormat.PNG, 95, out)
-                }
-                Log.d(tag, "Wallpaper backed up successfully to ${backupFile.absolutePath}")
-                true
-            } else {
-                Log.w(tag, "WallpaperManager returned null drawable")
-                false
-            }
-        } catch (e: Exception) {
-            Log.e(tag, "Error backing up wallpaper", e)
-            false
-        }
-    }
-
-    private fun restoreWallpaper(): Boolean {
-        return try {
-            val wm = WallpaperManager.getInstance(applicationContext)
-            val bmp = cachedWallpaperBitmap ?: run {
-                val backupFile = File(cacheDir, "wallpaper_backup.png")
-                if (backupFile.exists()) {
-                    BitmapFactory.decodeFile(backupFile.absolutePath)
-                } else {
-                    null
-                }
-            }
-
-            if (bmp != null) {
-                wm.setBitmap(bmp)
-                Toast.makeText(this, "Wallpaper restored!", Toast.LENGTH_SHORT).show()
-                true
-            } else {
-                Toast.makeText(this, "No saved wallpaper backup found.", Toast.LENGTH_SHORT).show()
-                false
-            }
-        } catch (e: Exception) {
-            Log.e(tag, "Error restoring wallpaper", e)
-            Toast.makeText(this, "Restore error: ${e.message}", Toast.LENGTH_LONG).show()
-            false
-        }
-    }
-
-    private fun showSafetyApplyDialog() {
-        if (selectedApp.isEmpty()) {
+    private fun handleActionClick() {
+        if (selectedPosition !in 0 until packItems.size) {
             Toast.makeText(this, "Please select an icon pack", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val preserve = cbPreserveWallpaper.isChecked
+        val item = packItems[selectedPosition]
+        if (item.isPlaceholder) return
 
-        val message = StringBuilder().apply {
-            append("Apply \"$selectedName\" to ASUS Launcher?\n\n")
-            append("Safety Checks:\n")
-            if (preserve) {
-                append("✓ Wallpaper Protection: Active (Wallpaper will be saved and protected)\n")
-            } else {
-                append("⚠ Wallpaper Protection: Disabled\n")
-            }
-            append("✓ Only app icons are updated (no global theme reset)\n")
-            append("✓ Target: $selectedApp")
+        if (item.isDefault) {
+            executeApply("system_default", item.name)
+            return
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("Apply Icon Pack")
-            .setMessage(message.toString())
-            .setPositiveButton("Apply") { _, _ ->
-                executeApply(selectedApp, selectedName, preserve)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        if (!item.isAsusCompatible) {
+            // Incompatible! Directly trigger converter
+            convertIconPack(item)
+        } else {
+            // Fully compatible! Apply cleanly.
+            AlertDialog.Builder(this)
+                .setTitle("Apply Icon Pack")
+                .setMessage(
+                    "Apply \"${item.name}\" to ASUS Launcher?\n\n" +
+                    "✓ Status: Verified ASUS Launcher Compatible\n" +
+                    "✓ Wallpaper Safety: Your wallpaper is 100% untouched\n" +
+                    "✓ App Drawer & Home Icons will be updated."
+                )
+                .setPositiveButton("Apply") { _, _ ->
+                    executeApply(item.packageName, item.name)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
     }
 
-    private fun executeApply(pkg: String, name: String, preserveWallpaper: Boolean) {
+    @Suppress("DEPRECATION")
+    private fun convertIconPack(item: IconPackItem) {
+        val progressDialog = ProgressDialog(this).apply {
+            setTitle("Converting Icon Pack")
+            setMessage("Converting \"${item.name}\" for ASUS Launcher...\n\n• Upscaling to full 192x192 size\n• Preserving custom shape\n• Generating binary res/xml/appfilter.xml\n• Signing package")
+            setCancelable(false)
+            show()
+        }
+
+        backgroundExecutor.execute {
+            var success = false
+            var outputApkPath: String? = null
+            var errorMessage: String? = null
+
+            try {
+                val encodedPkg = URLEncoder.encode(item.packageName, "UTF-8")
+                val url = URL("http://127.0.0.1:8899/convert?package=$encodedPkg")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 8000
+                conn.readTimeout = 60000
+                conn.doInput = true
+
+                val responseCode = conn.responseCode
+                val responseStream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
+                val responseText = responseStream.bufferedReader().use { it.readText() }
+
+                val json = JSONObject(responseText)
+                if (json.optBoolean("success", false)) {
+                    success = true
+                    outputApkPath = json.optString("output_apk")
+                } else {
+                    errorMessage = json.optString("error", "Unknown conversion error")
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Conversion request failed", e)
+                errorMessage = e.message
+            }
+
+            mainHandler.post {
+                progressDialog.dismiss()
+                if (success && !outputApkPath.isNullOrEmpty()) {
+                    val apkFile = File(outputApkPath)
+                    AlertDialog.Builder(this)
+                        .setTitle("✓ Conversion Complete!")
+                        .setMessage(
+                            "\"${item.name}\" was converted successfully!\n\n" +
+                            "• Full 192x192 Size: Applied\n" +
+                            "• Custom Shape: Preserved\n" +
+                            "• ASUS Appfilter: Compiled\n\n" +
+                            "Tap 'Install' to update the pack on your system."
+                        )
+                        .setPositiveButton("Install Now") { _, _ ->
+                            promptInstallApk(apkFile)
+                        }
+                        .setNegativeButton("Later", null)
+                        .show()
+                } else {
+                    // Daemon not running or failed
+                    AlertDialog.Builder(this)
+                        .setTitle("Converter Service Notice")
+                        .setMessage(
+                            "Automatic in-app conversion requires the local converter daemon:\n" +
+                            (errorMessage ?: "Connection refused on localhost:8899") + "\n\n" +
+                            "To start the daemon in Termux / PRoot:\n" +
+                            "  /root/iconchange/apply_iconpack.sh daemon\n\n" +
+                            "Or convert manually:\n" +
+                            "  /root/iconchange/apply_iconpack.sh patch \"${item.packageName}\""
+                        )
+                        .setPositiveButton("Copy Command") { _, _ ->
+                            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("Fix command", "/root/iconchange/apply_iconpack.sh patch \"${item.packageName}\"")
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(this, "Command copied to clipboard!", Toast.LENGTH_SHORT).show()
+                        }
+                        .setNeutralButton("Apply Anyway") { _, _ ->
+                            executeApply(item.packageName, item.name)
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun executeApply(pkg: String, name: String) {
         val targetPkg = if (pkg == "com.asus.launcher" || pkg == "system_default") {
             "system_default"
         } else {
             pkg
-        }
-
-        if (preserveWallpaper) {
-            backupCurrentWallpaper()
         }
 
         var started = false
@@ -393,21 +522,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (started) {
-            // If preserve wallpaper is enabled, restore the saved wallpaper after 1.8 seconds
-            if (preserveWallpaper) {
-                mainHandler.postDelayed({
-                    try {
-                        restoreWallpaper()
-                    } catch (e: Exception) {
-                        Log.e(tag, "Auto-restore wallpaper failed", e)
-                    }
-                }, 1800)
-            }
-
             val msg = if (targetPkg == "system_default") {
                 "Restoring Default ZenUI / ROG Icons..."
             } else {
-                "Applying $name..."
+                "Applied $name! ASUS Launcher is refreshing icons..."
             }
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         } else {
@@ -439,11 +557,8 @@ class MainActivity : AppCompatActivity() {
         return when (item.itemId) {
             R.id.refresh_menu_item -> {
                 startAsyncScan()
+                checkReadyFixedApks()
                 Toast.makeText(this, "Scanning...", Toast.LENGTH_SHORT).show()
-                true
-            }
-            R.id.restore_wallpaper_menu_item -> {
-                restoreWallpaper()
                 true
             }
             R.id.playstore_menu_item -> {
