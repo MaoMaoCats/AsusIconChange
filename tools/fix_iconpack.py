@@ -12,6 +12,7 @@ into ASUS Launcher–compatible format by:
 import sys
 import os
 import io
+import time
 import shutil
 import zipfile
 import subprocess
@@ -215,11 +216,12 @@ def fix_icon_pack(apk_path, output_apk_path=None):
     if not output_apk_path:
         output_apk_path = f"/sdcard/Download/{safe_pkg_suffix}_ASUS_Fixed.apk"
 
+    ver_code = int(time.time())
     manifest = f'''<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="{pkg_name}"
-    android:versionCode="1"
-    android:versionName="1.0">
+    android:versionCode="{ver_code}"
+    android:versionName="1.{ver_code % 10000}">
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="34" />
     <application
         android:allowBackup="true"

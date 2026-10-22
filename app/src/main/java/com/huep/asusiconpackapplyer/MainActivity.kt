@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
@@ -178,6 +179,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun promptInstallApk(file: File) {
+        if (!file.exists()) {
+            Toast.makeText(this, "APK file not found: ${file.absolutePath}", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // On Android 8.0+ (Oreo to Android 16), check REQUEST_INSTALL_PACKAGES permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!packageManager.canRequestPackageInstalls()) {
+                AlertDialog.Builder(this)
+                    .setTitle("Permission Needed: Install Unknown Apps")
+                    .setMessage(
+                        "Android requires permission to install converted icon packs.\n\n" +
+                        "1. Tap 'Grant Permission' below.\n" +
+                        "2. Turn ON 'Allow from this source'.\n" +
+                        "3. Return here and tap Install again.\n\n" +
+                        "(You can also install manually by opening your phone's File Manager / Download folder and tapping \"${file.name}\")."
+                    )
+                    .setPositiveButton("Grant Permission") { _, _ ->
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            try {
+                                startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                            } catch (e2: Exception) {
+                                Toast.makeText(this, "Please allow 'Install unknown apps' in Android Settings -> Apps", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+                return
+            }
+        }
+
         try {
             val apkUri: Uri = FileProvider.getUriForFile(
                 applicationContext,
@@ -187,13 +225,23 @@ class MainActivity : AppCompatActivity() {
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(installIntent)
             Toast.makeText(this, "Opening installer for ${file.name}...", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Log.e(tag, "Install prompt failed", e)
-            Toast.makeText(this, "Could not open installer: ${e.message}", Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(this)
+                .setTitle("Installer Notice")
+                .setMessage(
+                    "Could not launch package installer: ${e.message}\n\n" +
+                    "The converted APK is saved in your Download folder:\n" +
+                    "${file.absolutePath}\n\n" +
+                    "You can open your phone's Files / File Manager app, go to Downloads, and tap \"${file.name}\" to install it directly."
+                )
+                .setPositiveButton("OK", null)
+                .show()
         }
     }
 
